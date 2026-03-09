@@ -11,6 +11,7 @@ export type ModelSelectedContext = {
   provider: string;
   model: string;
   thinkLevel: string | undefined;
+  tier?: string;
 };
 
 export type TypingPolicy =

@@ -37,6 +37,19 @@ export function createReplyPrefixContext(params: {
     prefixContext.model = extractShortModelName(ctx.model);
     prefixContext.modelFull = `${ctx.provider}/${ctx.model}`;
     prefixContext.thinkingLevel = ctx.thinkLevel ?? "off";
+    
+    // Set execution mode indicator
+    if (ctx.tier) {
+      if (ctx.tier === "tier_fast" && (ctx.provider === "ollama" || ctx.provider === "lm-studio")) {
+        prefixContext.executionMode = "⚡ [本地极速]";
+      } else if (ctx.tier === "tier_smart" && (ctx.provider !== "ollama" && ctx.provider !== "lm-studio")) {
+        prefixContext.executionMode = "🧠 [深度思考]";
+      } else if (ctx.provider !== "ollama" && ctx.provider !== "lm-studio") {
+        prefixContext.executionMode = "☁️ [云端兜底]";
+      } else {
+        prefixContext.executionMode = "";
+      }
+    }
   };
 
   return {

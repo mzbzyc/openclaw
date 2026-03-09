@@ -16,6 +16,8 @@ export type ResponsePrefixContext = {
   thinkingLevel?: string;
   /** Agent identity name */
   identityName?: string;
+  /** Execution mode indicator */
+  executionMode?: string;
 };
 
 // Regex pattern for template variables: {variableName} or {variable.name}
@@ -59,6 +61,9 @@ export function resolveResponsePrefixTemplate(
       case "identity.name":
       case "identityname":
         return context.identityName ?? match;
+      case "executionmode":
+      case "mode":
+        return context.executionMode ?? match;
       default:
         // Leave unrecognized variables as-is
         return match;

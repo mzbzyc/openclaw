@@ -5,6 +5,8 @@ export type SkillConfig = {
   apiKey?: SecretInput;
   env?: Record<string, string>;
   config?: Record<string, unknown>;
+  /** Model tier for skill-specific routing (e.g., "tier_fast", "tier_balanced", "tier_smart") */
+  model_tier?: string;
 };
 
 export type SkillsLoadConfig = {

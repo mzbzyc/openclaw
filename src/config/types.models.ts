@@ -69,8 +69,16 @@ export type BedrockDiscoveryConfig = {
   defaultMaxTokens?: number;
 };
 
+export type ModelTierConfig = {
+  primary: string;
+  fallbacks?: string[];
+  maxConcurrency?: number;
+  timeoutMs?: number;
+};
+
 export type ModelsConfig = {
   mode?: "merge" | "replace";
   providers?: Record<string, ModelProviderConfig>;
   bedrockDiscovery?: BedrockDiscoveryConfig;
+  tiers?: Record<string, ModelTierConfig>;
 };

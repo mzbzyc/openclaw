@@ -2,7 +2,7 @@ import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-a
 import type { OpenClawConfig } from "../config/config.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
-import { logWarn } from "../logger.js";
+import { logWarn, logInfo } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
@@ -57,6 +57,198 @@ import {
   resolveToolProfilePolicy,
 } from "./tool-policy.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
+
+// Sensitive operations list
+const SENSITIVE_OPERATIONS = new Set([
+  "rm",
+  "rmdir",
+  "del",
+  "erase",
+  "unlink",
+  "remove",
+  "overwrite",
+  "mv",
+  "move",
+  "rename",
+  "cp",
+  "copy",
+  "scp",
+  "ssh",
+  "sudo",
+  "su",
+  "chmod",
+  "chown",
+  "mkdir",
+  "touch",
+  "echo",
+]);
+
+// Safe commands whitelist
+const SAFE_COMMANDS = new Set([
+  "ls",
+  "dir",
+  "pwd",
+  "cd",
+  "cat",
+  "type",
+  "echo",
+  "grep",
+  "find",
+  "which",
+  "where",
+  "whoami",
+  "date",
+  "time",
+  "uname",
+  "hostname",
+  "ping",
+  "traceroute",
+  "netstat",
+  "ifconfig",
+  "ipconfig",
+  "curl",
+  "wget",
+  "head",
+  "tail",
+  "less",
+  "more",
+  "sort",
+  "uniq",
+  "wc",
+  "cut",
+  "awk",
+  "sed",
+  "grep",
+  "find",
+  "xargs",
+  "echo",
+  "printf",
+  "env",
+  "export",
+  "set",
+  "unset",
+  "history",
+  "alias",
+  "unalias",
+  "help",
+  "man",
+  "info",
+  "python",
+  "python3",
+  "node",
+  "npm",
+  "yarn",
+  "pnpm",
+  "bun",
+  "git",
+  "git status",
+  "git log",
+  "git diff",
+  "git branch",
+  "git remote",
+  "git fetch",
+  "git pull",
+  "git push",
+  "git commit",
+  "git add",
+  "git rm",
+  "git checkout",
+  "git merge",
+  "git rebase",
+  "git stash",
+  "git tag",
+  "git reset",
+  "git clean",
+  "git clone",
+  "git init",
+  "git config",
+  "git remote add",
+  "git remote remove",
+  "git remote rename",
+  "git remote set-url",
+  "git remote show",
+  "git remote prune",
+  "git remote update",
+  "git fetch --prune",
+  "git pull --prune",
+  "git push --prune",
+  "git commit --amend",
+  "git rebase -i",
+  "git stash pop",
+  "git stash apply",
+  "git stash list",
+  "git stash drop",
+  "git stash clear",
+  "git tag -a",
+  "git tag -d",
+  "git tag -l",
+  "git reset HEAD",
+  "git reset HEAD~1",
+  "git reset --hard",
+  "git reset --soft",
+  "git clean -f",
+  "git clean -fd",
+  "git clean -fX",
+  "git clean -fdX",
+  "git clone --depth 1",
+  "git clone --branch",
+  "git clone --single-branch",
+  "git init --bare",
+  "git config --global",
+  "git config --local",
+  "git config --system",
+]);
+
+// Check if command is in whitelist
+function isCommandAllowed(command: string): boolean {
+  const normalizedCommand = command.trim().toLowerCase().split(/\s+/)[0];
+  return SAFE_COMMANDS.has(normalizedCommand);
+}
+
+// Check if operation is sensitive
+function isSensitiveOperation(command: string): boolean {
+  const normalizedCommand = command.trim().toLowerCase();
+  return Array.from(SENSITIVE_OPERATIONS).some(op => normalizedCommand.includes(op));
+}
+
+// Wrap tool to add security checks
+function wrapToolWithSecurityChecks(tool: AnyAgentTool): AnyAgentTool {
+  const originalExecute = tool.execute;
+  
+  tool.execute = async (toolCallId: string, params: any, signal?: AbortSignal, onUpdate?: any) => {
+    // Check exec tool
+    if (tool.name === "exec") {
+      const command = params.command || params.cmd || "";
+      
+      // Check if command is in whitelist
+      if (!isCommandAllowed(command)) {
+        throw new Error(`Command not allowed: ${command}. Only commands in the whitelist are permitted.`);
+      }
+      
+      // Check if operation is sensitive
+      if (isSensitiveOperation(command)) {
+        // For sensitive operations, require confirmation
+        if (!params.confirm) {
+          throw new Error(`Sensitive operation detected. Please confirm by adding "--confirm" to the command.`);
+        }
+        logInfo(`Sensitive operation confirmed: ${command}`);
+      }
+    }
+    
+    // Check file operation tools
+    if (tool.name === "write" || tool.name === "edit" || tool.name === "apply_patch") {
+      // Check if path is sensitive
+      const path = params.path || params.file || "";
+      if (path.includes("../") || path.startsWith("/") || path.includes("C:\\") || path.includes("D:\\")) {
+        throw new Error(`Path not allowed: ${path}. Only relative paths within the workspace are permitted.`);
+      }
+    }
+    
+    return await originalExecute(toolCallId, params, signal, onUpdate);
+  };
+  
+  return tool;
+}
 
 function isOpenAIProvider(provider?: string) {
   const normalized = provider?.trim().toLowerCase();
@@ -566,8 +758,11 @@ export function createOpenClawCodingTools(options?: {
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
     : withHooks;
 
+  // 添加安全检查
+  const withSecurityChecks = withAbort.map((tool) => wrapToolWithSecurityChecks(tool));
+
   // NOTE: Keep canonical (lowercase) tool names here.
   // pi-ai's Anthropic OAuth transport remaps tool names to Claude Code-style names
   // on the wire and maps them back for tool dispatch.
-  return withAbort;
+  return withSecurityChecks;
 }
